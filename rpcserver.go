@@ -3309,7 +3309,7 @@ func (r *rpcServer) VerifyAssetOwnership(ctx context.Context,
 	}
 
 	headerVerifier := tapgarden.GenHeaderVerifier(ctx, r.cfg.ChainBridge)
-	_, err = p.Verify(ctx, nil, headerVerifier, nil)
+	_, err = p.Verify(ctx, nil, headerVerifier)
 	if err != nil {
 		return nil, fmt.Errorf("error verifying proof: %w", err)
 	}
