@@ -12,7 +12,6 @@ import (
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/lightninglabs/taproot-assets/asset"
 	"github.com/lightninglabs/taproot-assets/fn"
@@ -366,7 +365,8 @@ func verifyProofBlob(t *testing.T, tapClient taprpc.TaprootAssetsClient,
 		return err
 	}
 
-	snapshot, err := f.Verify(ctxt, headerVerifier)
+	// TODO(jhb): Real group verifier
+	snapshot, err := f.Verify(ctxt, headerVerifier, proof.MockGroupVerifier)
 	require.NoError(t, err)
 
 	return f, snapshot
@@ -845,15 +845,20 @@ func AssertGroup(t *testing.T, a *taprpc.Asset, b *taprpc.AssetHumanReadable,
 // AssertGroupAnchor asserts that a specific asset genesis was used to create
 // a tweaked group key.
 func AssertGroupAnchor(t *testing.T, anchorGen *asset.Genesis,
-	internalKey, tweakedKey []byte) {
+	anchorGroup *taprpc.AssetGroup) {
 
-	internalPubKey, err := btcec.ParsePubKey(internalKey)
+	anchorTweak := anchorGen.ID()
+	internalPubKey, err := btcec.ParsePubKey(anchorGroup.RawGroupKey)
 	require.NoError(t, err)
-	computedGroupPubKey := txscript.ComputeTaprootOutputKey(
-		internalPubKey, anchorGen.GroupKeyTweak(),
+
+	// TODO(jhb): Will need to add tapscript root support here
+	computedGroupPubKey, err := asset.GroupPubKey(
+		internalPubKey, anchorTweak[:], nil,
 	)
+	require.NoError(t, err)
+
 	computedGroupKey := computedGroupPubKey.SerializeCompressed()
-	require.Equal(t, tweakedKey, computedGroupKey)
+	require.Equal(t, anchorGroup.TweakedGroupKey, computedGroupKey)
 }
 
 // MatchRpcAsset is a function that returns true if the given RPC asset is a

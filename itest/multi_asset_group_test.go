@@ -39,6 +39,8 @@ func testMintMultiAssetGroups(t *harnessTest) {
 	// The minted batch should contain 7 assets total, and the daemon should
 	// now be aware of 3 asset groups. Each group should have a different
 	// number of assets, and a different total balance.
+	// In logs we only see two groups when filtering by group key reveal,
+	// should be 3
 	mintedBatch := mintAssetsConfirmBatch(t, t.tapd, complexBatch)
 
 	// Once the batch is minted, we can verify that all asset groups were
@@ -191,10 +193,7 @@ func VerifyGroupAnchor(t *testing.T, assets []*taprpc.Asset,
 
 	anchorGen := parseGenInfo(t, anchor.AssetGenesis)
 	anchorGen.Type = asset.Type(anchor.AssetType)
-	AssertGroupAnchor(
-		t, anchorGen, anchor.AssetGroup.RawGroupKey,
-		anchor.AssetGroup.TweakedGroupKey,
-	)
+	AssertGroupAnchor(t, anchorGen, anchor.AssetGroup)
 
 	return anchor
 }

@@ -233,27 +233,32 @@ func upsertAssetGen(ctx context.Context, db UpsertAssetStore,
 
 	// Finally, if there's a group key associated with the asset, then
 	// we'll insert that now as well.
-	if groupKey != nil && genesisProof.GroupKeyReveal == nil {
-		fmt.Printf("nil group reveal!")
-	}
-
-	if groupKey != nil && genesisProof.GroupKeyReveal != nil {
-		reveal := genesisProof.GroupKeyReveal
-		rawKey, err := reveal.RawKey.ToPubKey()
-		if err != nil {
-			return 0, err
-		}
-
+	if groupKey != nil {
+		groupWitness := genesisProof.Asset.PrevWitnesses[0].TxWitness
 		fullGroupKey := &asset.GroupKey{
 			GroupPubKey: groupKey.GroupPubKey,
-			RawKey: keychain.KeyDescriptor{
+			Witness:     groupWitness,
+		}
+
+		// TOOO(jhb): godoc
+		if genesisProof.GroupKeyReveal != nil {
+			reveal := genesisProof.GroupKeyReveal
+			rawKey, err := reveal.RawKey.ToPubKey()
+			if err != nil {
+				return 0, err
+			}
+
+			fullGroupKey.RawKey = keychain.KeyDescriptor{
 				PubKey: rawKey,
-			},
-			Witness: genesisProof.Asset.PrevWitnesses[0].TxWitness,
+			}
+			if len(reveal.TapscriptRoot) != 0 {
+				copy(
+					fullGroupKey.TapscriptRoot[:],
+					reveal.TapscriptRoot,
+				)
+			}
 		}
-		if len(reveal.TapscriptRoot) != 0 {
-			copy(fullGroupKey.TapscriptRoot[:], reveal.TapscriptRoot)
-		}
+
 		_, err = upsertGroupKey(
 			ctx, fullGroupKey, db, genPointID, genAssetID,
 		)

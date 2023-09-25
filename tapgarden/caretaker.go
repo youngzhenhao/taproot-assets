@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/btcutil/psbt"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -476,6 +477,7 @@ func (b *BatchCaretaker) seedlingsToAssetSprouts(ctx context.Context,
 		// If a group witness needs to be produced, then we will need a
 		// partially filled asset as part of the signing process.
 		if groupInfo != nil || seedling.EnableEmission {
+			log.Infof("Making proto asset with gen: %v", assetGen)
 			protoAsset, err = asset.New(
 				assetGen, amount, 0, 0, tweakedScriptKey, nil,
 			)
@@ -486,6 +488,8 @@ func (b *BatchCaretaker) seedlingsToAssetSprouts(ctx context.Context,
 		}
 
 		if groupInfo != nil {
+			log.Infof("Reissuing with gen: %v", assetGen)
+			log.Infof("Anchor gen: %v", groupInfo.Genesis)
 			sproutGroupKey, err = asset.DeriveGroupKey(
 				b.cfg.GenSigner, b.cfg.GenTxBuilder,
 				groupInfo.GroupKey.RawKey,
@@ -510,6 +514,7 @@ func (b *BatchCaretaker) seedlingsToAssetSprouts(ctx context.Context,
 					"derive group key: %w", err)
 			}
 
+			log.Infof("Creating group with gen: %v", assetGen)
 			sproutGroupKey, err = asset.DeriveGroupKey(
 				b.cfg.GenSigner, b.cfg.GenTxBuilder,
 				rawGroupKey, assetGen, protoAsset,
@@ -860,6 +865,8 @@ func (b *BatchCaretaker) stateStep(currentState BatchState) (BatchState, error) 
 		defer cancel()
 
 		headerVerifier := GenHeaderVerifier(ctx, b.cfg.ChainBridge)
+		groupVerifier := GenGroupVerifier(ctx, b.cfg.Log)
+		groupAnchorVerifier := GenGroupAnchorVerifier(ctx, b.cfg.Log)
 
 		// Now that the minting transaction has been confirmed, we'll
 		// need to create the series of proof file blobs for each of
@@ -892,14 +899,22 @@ func (b *BatchCaretaker) stateStep(currentState BatchState) (BatchState, error) 
 				"%w", err)
 		}
 
+		// TODO(jhb): godoc
 		mintingProofs, err := proof.NewMintingBlobs(
-			baseProof, headerVerifier,
+			baseProof, headerVerifier, groupVerifier,
+			groupAnchorVerifier,
 			proof.WithAssetMetaReveals(b.cfg.Batch.AssetMetas),
 		)
 		if err != nil {
 			return 0, fmt.Errorf("unable to construct minting "+
 				"proofs: %w", err)
 		}
+
+		allProofs := maps.Values(mintingProofs)
+		anchorCount := fn.Count(allProofs, func(p *proof.Proof) bool {
+			return p.GroupKeyReveal != nil
+		})
+		log.Infof("Anchor count after minting proofgen: %d", anchorCount)
 
 		var (
 			committedAssets   = batchCommitment.CommittedAssets()
@@ -929,41 +944,63 @@ func (b *BatchCaretaker) stateStep(currentState BatchState) (BatchState, error) 
 			})
 		}
 
+		anchorAssets, nonAnchorAssets := SortAssets(
+			committedAssets, groupAnchorVerifier,
+		)
+		log.Infof("anchor count: %d", len(anchorAssets))
+
 		// Before we confirm the batch, we'll also update the on disk
 		// file system as well.
 		//
 		// TODO(roasbeef): rely on the upsert here instead
-		err = fn.ParSlice(
-			ctx, committedAssets,
-			func(ctx context.Context, newAsset *asset.Asset) error {
-				scriptPubKey := newAsset.ScriptKey.PubKey
-				scriptKey := asset.ToSerialized(scriptPubKey)
+		// is part of this failing mb? Seems like we'd need to do the
+		// same partitioning based on group anchor-ness
 
-				mintingProof := mintingProofs[scriptKey]
+		updateAssetProofs := func(assets []*asset.Asset) error {
+			err := fn.ParSlice(
+				ctx, committedAssets,
+				func(ctx context.Context, newAsset *asset.Asset) error {
+					scriptPubKey := newAsset.ScriptKey.PubKey
+					scriptKey := asset.ToSerialized(scriptPubKey)
 
-				proofBlob, uniProof, err := b.storeMintingProof(
-					ctx, newAsset, mintingProof, mintTxHash,
-					headerVerifier,
-				)
-				if err != nil {
-					return fmt.Errorf("unable to store "+
-						"proof: %w", err)
-				}
+					mintingProof := mintingProofs[scriptKey]
 
-				proofMutex.Lock()
-				mintingProofBlobs[scriptKey] = proofBlob
-				proofMutex.Unlock()
+					proofBlob, uniProof, err := b.storeMintingProof(
+						ctx, newAsset, mintingProof, mintTxHash,
+						headerVerifier, groupVerifier,
+					)
+					if err != nil {
+						return fmt.Errorf("unable to store "+
+							"proof: %w", err)
+					}
 
-				if uniProof != nil {
-					universeItems <- uniProof
-				}
+					proofMutex.Lock()
+					mintingProofBlobs[scriptKey] = proofBlob
+					proofMutex.Unlock()
 
-				return nil
-			},
-		)
+					if uniProof != nil {
+						universeItems <- uniProof
+					}
+
+					return nil
+				},
+			)
+			if err != nil {
+				return fmt.Errorf("unable to update asset proofs: "+
+					"%w", err)
+			}
+
+			return nil
+		}
+
+		err = updateAssetProofs(anchorAssets)
 		if err != nil {
-			return 0, fmt.Errorf("unable to update asset proofs: "+
-				"%w", err)
+			return 0, err
+		}
+
+		err = updateAssetProofs(nonAnchorAssets)
+		if err != nil {
+			return 0, err
 		}
 
 		// The local proof store inserts are now completed, but we also
@@ -1025,8 +1062,9 @@ func (b *BatchCaretaker) stateStep(currentState BatchState) (BatchState, error) 
 // can be used to register the asset with the universe.
 func (b *BatchCaretaker) storeMintingProof(ctx context.Context,
 	a *asset.Asset, mintingProof *proof.Proof, mintTxHash chainhash.Hash,
-	headerVerifier proof.HeaderVerifier) (proof.Blob,
-	*universe.IssuanceItem, error) {
+	headerVerifier proof.HeaderVerifier,
+	groupVerifier proof.GroupVerifier) (proof.Blob, *universe.IssuanceItem,
+	error) {
 
 	assetID := a.ID()
 	blob, err := proof.EncodeAsProofFile(mintingProof)
@@ -1036,7 +1074,8 @@ func (b *BatchCaretaker) storeMintingProof(ctx context.Context,
 	}
 
 	err = b.cfg.ProofFiles.ImportProofs(
-		ctx, headerVerifier, false, &proof.AnnotatedProof{
+		ctx, headerVerifier, groupVerifier, false,
+		&proof.AnnotatedProof{
 			Locator: proof.Locator{
 				AssetID:   &assetID,
 				ScriptKey: *a.ScriptKey.PubKey,
@@ -1114,6 +1153,7 @@ func (b *BatchCaretaker) batchStreamUniverseItems(ctx context.Context,
 		numItems int
 		uni      = b.cfg.Universe
 	)
+	// Stuff looks weird here as well
 	err := fn.CollectBatch(
 		ctx, universeItems, b.cfg.UniversePushBatchSize,
 		func(ctx context.Context,
@@ -1163,6 +1203,33 @@ func SortSeedlings(seedlings []*Seedling) []string {
 	return allSeedlings
 }
 
+func SortAssets(fullAssets []*asset.Asset,
+	anchorVerifier proof.GroupAnchorVerifier) ([]*asset.Asset,
+	[]*asset.Asset) {
+
+	var anchorAssets, nonAnchorAssets []*asset.Asset
+	for _, fullAsset := range fullAssets {
+		switch {
+		case fullAsset.GroupKey != nil:
+			err := anchorVerifier(
+				&fullAsset.Genesis,
+				&fullAsset.GroupKey.GroupPubKey,
+			)
+
+			switch {
+			case err == nil:
+				anchorAssets = append(anchorAssets, fullAsset)
+			default:
+				nonAnchorAssets = append(nonAnchorAssets, fullAsset)
+			}
+		default:
+			nonAnchorAssets = append(nonAnchorAssets, fullAsset)
+		}
+	}
+
+	return anchorAssets, nonAnchorAssets
+}
+
 // GetTxFee returns the value of the on-chain fees paid by a finalized PSBT.
 func GetTxFee(pkt *psbt.Packet) (int64, error) {
 	inputValue, err := psbt.SumUtxoInputValues(pkt)
@@ -1187,4 +1254,65 @@ func GenHeaderVerifier(ctx context.Context,
 		err := chainBridge.VerifyBlock(ctx, header, height)
 		return err
 	}
+}
+
+// TODO(jhb): godoc
+func GenGroupVerifier(ctx context.Context,
+	mintingStore MintingStore) func(*btcec.PublicKey) error {
+
+	return func(groupKey *btcec.PublicKey) error {
+		if groupKey == nil {
+			return fmt.Errorf("cannot verify empty group key")
+		}
+
+		storedGroup, err := mintingStore.FetchGroupByGroupKey(
+			ctx, groupKey,
+		)
+		if err != nil {
+			return err
+		}
+
+		if !groupKey.IsEqual(&storedGroup.GroupPubKey) {
+			return fmt.Errorf("mismatch with stored group key")
+		}
+
+		return nil
+	}
+}
+
+// TODO(jhb): godoc
+func GenGroupAnchorVerifier(ctx context.Context,
+	mintingStore MintingStore) func(*asset.Genesis,
+	*btcec.PublicKey) error {
+
+	// Cache anchors we already fetched.
+	groupAnchors := make(map[asset.SerializedKey]*asset.Genesis)
+
+	return func(gen *asset.Genesis, groupKey *btcec.PublicKey) error {
+		assetGroupKey := asset.ToSerialized(groupKey)
+		groupAnchor, ok := groupAnchors[assetGroupKey]
+		if !ok {
+			// This returns an err on empty fetch.
+			storedGroup, err := mintingStore.FetchGroupByGroupKey(
+				ctx, groupKey,
+			)
+			if err != nil {
+				return err
+			}
+
+			log.Infof("Stored group key: %v", spew.Sdump(storedGroup))
+			groupAnchors[assetGroupKey] = storedGroup.Genesis
+			log.Infof("New cached group anchor! %v", storedGroup.Genesis)
+			log.Infof("Group anchor cache size: %d", len(groupAnchors))
+			groupAnchor = storedGroup.Genesis
+		}
+
+		if gen.ID() != groupAnchor.ID() {
+			log.Infof("Asset not group anchor: %v", gen)
+			return fmt.Errorf("asset not group anchor")
+		}
+
+		return nil
+	}
+
 }

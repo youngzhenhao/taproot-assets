@@ -38,6 +38,9 @@ type ChainPorterConfig struct {
 	// ChainBridge is our bridge to the chain we operate on.
 	ChainBridge ChainBridge
 
+	// TODO(jhb): godoc
+	GroupVerifier proof.GroupVerifier
+
 	// Wallet is used to fund+sign PSBTs for the transfer transaction.
 	Wallet WalletAnchor
 
@@ -345,7 +348,8 @@ func (p *ChainPorter) storeProofs(sendPkg *sendPackage) error {
 	log.Infof("Importing %d passive asset proofs into local Proof "+
 		"Archive", len(passiveAssetProofFiles))
 	err := p.cfg.AssetProofs.ImportProofs(
-		ctx, headerVerifier, false, passiveAssetProofFiles...,
+		ctx, headerVerifier, p.cfg.GroupVerifier, false,
+		passiveAssetProofFiles...,
 	)
 	if err != nil {
 		return fmt.Errorf("error importing passive proof: %w", err)
@@ -463,7 +467,8 @@ func (p *ChainPorter) storeProofs(sendPkg *sendPackage) error {
 		log.Infof("Importing proof for output %d into local Proof "+
 			"Archive", idx)
 		err = p.cfg.AssetProofs.ImportProofs(
-			ctx, headerVerifier, false, outputProof,
+			ctx, headerVerifier, p.cfg.GroupVerifier, false,
+			outputProof,
 		)
 		if err != nil {
 			return fmt.Errorf("error importing proof: %w", err)

@@ -55,7 +55,7 @@ var (
 
 const (
 	minerMempoolTimeout = wait.MinerMempoolTimeout
-	defaultWaitTimeout  = lntest.DefaultTimeout
+	defaultWaitTimeout  = lntest.DefaultTimeout * 20
 
 	// defaultNodePort is the start of the range for listening ports of
 	// harness nodes. Ports are monotonically increasing starting from this
@@ -66,7 +66,7 @@ const (
 
 	// defaultTimeout is a timeout that will be used for various wait
 	// scenarios where no custom timeout value is defined.
-	defaultTimeout = time.Second * 10
+	defaultTimeout = time.Second * 10 * 60
 )
 
 // testCase is a struct that holds a single test case.

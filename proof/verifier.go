@@ -24,7 +24,8 @@ type Verifier interface {
 	// error if the proof file is valid. A valid file should return an
 	// AssetSnapshot of the final state transition of the file.
 	Verify(c context.Context, blobReader io.Reader,
-		headerVerifier HeaderVerifier) (*AssetSnapshot, error)
+		headerVerifier HeaderVerifier,
+		groupVerifier GroupVerifier) (*AssetSnapshot, error)
 }
 
 // BaseVerifier implements a simple verifier that loads the entire proof file
@@ -36,7 +37,8 @@ type BaseVerifier struct {
 // error if the proof file is valid. A valid file should return an
 // AssetSnapshot of the final state transition of the file.
 func (b *BaseVerifier) Verify(ctx context.Context, blobReader io.Reader,
-	headerVerifier HeaderVerifier) (*AssetSnapshot, error) {
+	headerVerifier HeaderVerifier,
+	groupVerifier GroupVerifier) (*AssetSnapshot, error) {
 
 	var proofFile File
 	err := proofFile.Decode(blobReader)
@@ -44,7 +46,7 @@ func (b *BaseVerifier) Verify(ctx context.Context, blobReader io.Reader,
 		return nil, fmt.Errorf("unable to parse proof: %w", err)
 	}
 
-	return proofFile.Verify(ctx, headerVerifier)
+	return proofFile.Verify(ctx, headerVerifier, groupVerifier)
 }
 
 // verifyTaprootProof attempts to verify a TaprootProof for inclusion or
@@ -163,7 +165,8 @@ func (p *Proof) verifyExclusionProofs() error {
 // state transition. This method returns the split asset information if this
 // state transition represents an asset split.
 func (p *Proof) verifyAssetStateTransition(ctx context.Context,
-	prev *AssetSnapshot, headerVerifier HeaderVerifier) (bool, error) {
+	prev *AssetSnapshot, headerVerifier HeaderVerifier,
+	groupVerifier GroupVerifier) (bool, error) {
 
 	// Determine whether we have an asset split based on the resulting
 	// asset's witness. If so, extract the root asset from the split asset.
@@ -207,7 +210,9 @@ func (p *Proof) verifyAssetStateTransition(ctx context.Context,
 		inputProof := inputProof
 
 		errGroup.Go(func() error {
-			result, err := inputProof.Verify(ctx, headerVerifier)
+			result, err := inputProof.Verify(
+				ctx, headerVerifier, groupVerifier,
+			)
 			if err != nil {
 				return err
 			}
@@ -320,9 +325,22 @@ func (p *Proof) verifyGenesisReveal() error {
 	return nil
 }
 
+func (p *Proof) verfyGenesisGroupKey(groupVerifier GroupVerifier) error {
+	log.Infof("Verifying genesis group key: %v", p.Asset.Genesis)
+	groupKey := p.Asset.GroupKey.GroupPubKey
+	err := groupVerifier(&groupKey)
+	if err != nil {
+		return ErrGroupKeyUnknown
+	}
+
+	return nil
+}
+
 // verifyGroupKeyReveal verifies that the group key reveal can be used to derive
 // the same key as the group key specified for the asset.
+// proof for collectible-tranche-1 has a groupkeyreveal when it shouldn't
 func (p *Proof) verifyGroupKeyReveal() error {
+	log.Infof("Verifying group key reveal: %v", p.Asset.Genesis)
 	groupKey := p.Asset.GroupKey
 	if groupKey == nil {
 		return ErrGroupKeyRequired
@@ -350,6 +368,15 @@ func (p *Proof) verifyGroupKeyReveal() error {
 // block header is invalid (usually: not present on chain).
 type HeaderVerifier func(blockHeader wire.BlockHeader, blockHeight uint32) error
 
+// GroupVerifier is a callback function which returns an error if the given
+// group key has not been imported by the tapd daemon. This can occur if the
+// issuance proof for the group anchor has not been imported / synced.
+type GroupVerifier func(groupKey *btcec.PublicKey) error
+
+// TODO(jhb): godoc
+type GroupAnchorVerifier func(gen *asset.Genesis,
+	groupKey *btcec.PublicKey) error
+
 // Verify verifies the proof by ensuring that:
 //
 //  0. A proof has a valid version.
@@ -362,7 +389,8 @@ type HeaderVerifier func(blockHeader wire.BlockHeader, blockHeight uint32) error
 //  5. A set of asset inputs with valid witnesses are included that satisfy the
 //     resulting state transition.
 func (p *Proof) Verify(ctx context.Context, prev *AssetSnapshot,
-	headerVerifier HeaderVerifier) (*AssetSnapshot, error) {
+	headerVerifier HeaderVerifier,
+	groupVerifier GroupVerifier) (*AssetSnapshot, error) {
 
 	// 0. Check only for the proof version.
 	if p.IsUnknownVersion() {
@@ -440,22 +468,31 @@ func (p *Proof) Verify(ctx context.Context, prev *AssetSnapshot,
 	// 6. Verify group key reveal for genesis assets. Not all assets have a
 	// group key, and should therefore not have a group key reveal. If a
 	// group key is present, the group key reveal must also be present.
+	// TODO(jhb): Unless the group key is already known
 	hasGroupKeyReveal := p.GroupKeyReveal != nil
 	hasGroupKey := p.Asset.GroupKey != nil
+	// TODO(jhb): Add group key check even if reveal is missing
 	switch {
 	case !isGenesisAsset && hasGroupKeyReveal:
 		return nil, ErrNonGenesisAssetWithGroupKeyReveal
 
-	case isGenesisAsset && hasGroupKey && !hasGroupKeyReveal:
-		return nil, ErrGroupKeyRevealRequired
-
 	case isGenesisAsset && !hasGroupKey && hasGroupKeyReveal:
 		return nil, ErrGroupKeyRequired
+
+	case isGenesisAsset && hasGroupKey && !hasGroupKeyReveal:
+		if err := p.verfyGenesisGroupKey(groupVerifier); err != nil {
+			return nil, err
+		}
 
 	case isGenesisAsset && hasGroupKey && hasGroupKeyReveal:
 		if err := p.verifyGroupKeyReveal(); err != nil {
 			return nil, err
 		}
+	}
+
+	// TODO(jhb): godoc
+	if !isGenesisAsset && hasGroupKey {
+		p.verfyGenesisGroupKey(groupVerifier)
 	}
 
 	// 7. Either a set of asset inputs with valid witnesses is included that
@@ -468,7 +505,7 @@ func (p *Proof) Verify(ctx context.Context, prev *AssetSnapshot,
 
 	default:
 		splitAsset, err = p.verifyAssetStateTransition(
-			ctx, prev, headerVerifier,
+			ctx, prev, headerVerifier, groupVerifier,
 		)
 	}
 	if err != nil {
@@ -507,7 +544,9 @@ func (p *Proof) Verify(ctx context.Context, prev *AssetSnapshot,
 // verification loop.
 //
 // TODO(roasbeef): pass in the expected genesis point here?
-func (f *File) Verify(ctx context.Context, headerVerifier HeaderVerifier) (
+func (f *File) Verify(ctx context.Context, headerVerifier HeaderVerifier,
+	groupVerifier GroupVerifier) (
+
 	*AssetSnapshot, error) {
 
 	select {
@@ -535,7 +574,9 @@ func (f *File) Verify(ctx context.Context, headerVerifier HeaderVerifier) (
 			return nil, err
 		}
 
-		result, err := decodedProof.Verify(ctx, prev, headerVerifier)
+		result, err := decodedProof.Verify(
+			ctx, prev, headerVerifier, groupVerifier,
+		)
 		if err != nil {
 			return nil, err
 		}

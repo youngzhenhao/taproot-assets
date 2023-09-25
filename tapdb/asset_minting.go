@@ -939,6 +939,8 @@ func (a *AssetMintingStore) AddSproutsToBatch(ctx context.Context,
 	// assets committed to within the root commitment specified.
 	assets := assetRoot.CommittedAssets()
 
+	// Need to sort by group anchor ness again
+
 	genesisOutpoint := genesisPacket.Pkt.UnsignedTx.TxIn[0].PreviousOutPoint
 
 	rawBatchKey := batchKey.SerializeCompressed()

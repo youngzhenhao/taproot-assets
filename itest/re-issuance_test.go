@@ -3,6 +3,7 @@ package itest
 import (
 	"context"
 	"encoding/hex"
+	"fmt"
 	"math"
 
 	"github.com/lightninglabs/taproot-assets/mssmt"
@@ -171,6 +172,12 @@ func testReIssuance(t *harnessTest) {
 		},
 	)
 	require.NoError(t.t, err)
+
+	groupsAfterReissue2, err := secondTapd.ListGroups(
+		ctxb, &taprpc.ListGroupsRequest{},
+	)
+	require.NoError(t.t, err)
+	fmt.Printf("%v\n", groupsAfterReissue2)
 
 	secondCollectSend := sendAssetsToAddr(t, t.tapd, collectReissueAddr)
 	confirmAndAssertOutboundTransfer(

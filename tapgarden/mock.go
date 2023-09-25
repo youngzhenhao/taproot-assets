@@ -362,6 +362,13 @@ func (m *MockChainBridge) EstimateFee(ctx context.Context,
 	return 253, nil
 }
 
+// TODO(jhb): Do we need state in here?
+func GenMockGroupVerifier() func(*btcec.PublicKey) error {
+	return func(groupKey *btcec.PublicKey) error {
+		return nil
+	}
+}
+
 type MockKeyRing struct {
 	FamIndex keychain.KeyFamily
 	KeyIndex uint32
@@ -481,8 +488,8 @@ func (m *MockProofArchive) FetchProofs(ctx context.Context,
 }
 
 func (m *MockProofArchive) ImportProofs(ctx context.Context,
-	headerVerifier proof.HeaderVerifier, replace bool,
-	proofs ...*proof.AnnotatedProof) error {
+	headerVerifier proof.HeaderVerifier, groupVerifier proof.GroupVerifier,
+	replace bool, proofs ...*proof.AnnotatedProof) error {
 
 	return nil
 }

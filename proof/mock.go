@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/lightninglabs/taproot-assets/asset"
@@ -27,7 +28,8 @@ func NewMockVerifier(t *testing.T) *MockVerifier {
 }
 
 func (m *MockVerifier) Verify(_ context.Context, _ io.Reader,
-	headerVerifier HeaderVerifier) (*AssetSnapshot, error) {
+	headerVerifier HeaderVerifier,
+	groupVerifier GroupVerifier) (*AssetSnapshot, error) {
 
 	return &AssetSnapshot{
 		Asset: &asset.Asset{
@@ -46,6 +48,17 @@ func (m *MockVerifier) Verify(_ context.Context, _ io.Reader,
 // Chain data is not available in unit tests. This function is useful for unit
 // tests which are not primarily concerned with block header verification.
 func MockHeaderVerifier(header wire.BlockHeader, height uint32) error {
+	return nil
+}
+
+// TODO(jhb): godoc
+func MockGroupVerifier(groupKey *btcec.PublicKey) error {
+	return nil
+}
+
+func MockGroupAnchorVerifier(gen *asset.Genesis,
+	groupKey *btcec.PublicKey) error {
+
 	return nil
 }
 

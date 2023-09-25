@@ -7,6 +7,7 @@ import (
 
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/wire"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/lightninglabs/taproot-assets/asset"
 	"github.com/lightninglabs/taproot-assets/commitment"
 )
@@ -135,6 +136,7 @@ func WithAssetMetaReveals(
 // serialized proof files, which proves the creation/existence of each of the
 // assets within the batch.
 func NewMintingBlobs(params *MintParams, headerVerifier HeaderVerifier,
+	groupVerifier GroupVerifier, anchorVerifier GroupAnchorVerifier,
 	blobOpts ...MintingBlobOption) (AssetProofs, error) {
 
 	opts := defaultMintingBlobOpts()
@@ -147,7 +149,10 @@ func NewMintingBlobs(params *MintParams, headerVerifier HeaderVerifier,
 		return nil, err
 	}
 
-	proofs, err := committedProofs(base, params.TaprootAssetRoot, opts)
+	// TODO(jhb): pass groupverifier here?
+	proofs, err := committedProofs(
+		base, params.TaprootAssetRoot, anchorVerifier, opts,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +163,7 @@ func NewMintingBlobs(params *MintParams, headerVerifier HeaderVerifier,
 	for key := range proofs {
 		proof := proofs[key]
 
-		_, err := proof.Verify(ctx, nil, headerVerifier)
+		_, err := proof.Verify(ctx, nil, headerVerifier, groupVerifier)
 		if err != nil {
 			return nil, fmt.Errorf("invalid proof file generated: "+
 				"%w", err)
@@ -211,7 +216,8 @@ func coreProof(params *BaseProofParams) (*Proof, error) {
 // committedProofs creates a map of proofs, keyed by the script key of each of
 // the assets committed to in the Taproot Asset root of the given params.
 func committedProofs(baseProof *Proof, taprootAssetRoot *commitment.TapCommitment,
-	opts *mintingBlobOpts) (AssetProofs, error) {
+	anchorVerifier GroupAnchorVerifier, opts *mintingBlobOpts) (AssetProofs,
+	error) {
 
 	// For each asset we'll construct the asset specific proof information,
 	// then encode that as a proof file blob in the blobs map.
@@ -261,19 +267,34 @@ func committedProofs(baseProof *Proof, taprootAssetRoot *commitment.TapCommitmen
 
 		// We also need to reveal the group key.
 		if newAsset.GroupKey != nil {
+			log.Infof("Grouped asset: %v", spew.Sdump(newAsset.Genesis))
+			var groupReveal *asset.GroupKeyReveal
 			groupKey := newAsset.GroupKey
 
-			// All zero tapscript root means there is none.
-			var tapscriptRoot []byte
-			if groupKey.TapscriptRoot != [32]byte{} {
-				tapscriptRoot = groupKey.TapscriptRoot[:]
+			log.Infof("Group key: %v", spew.Sdump(groupKey))
+			// Only populate the reveal if the asset is a group
+			// anchor and not a reissuance.
+			err := anchorVerifier(
+				&newAsset.Genesis, &groupKey.GroupPubKey,
+			)
+			log.Infof("Anchor verifier result: %v", err)
+			if err == nil {
+				// All zero tapscript root means there is none.
+				var tapscriptRoot []byte
+				if groupKey.TapscriptRoot != [32]byte{} {
+					tapscriptRoot = groupKey.TapscriptRoot[:]
+				}
+
+				groupReveal = &asset.GroupKeyReveal{
+					RawKey: asset.ToSerialized(
+						groupKey.RawKey.PubKey,
+					),
+					TapscriptRoot: tapscriptRoot,
+				}
 			}
 
-			assetProof.GroupKeyReveal = &asset.GroupKeyReveal{
-				RawKey: asset.ToSerialized(
-					groupKey.RawKey.PubKey,
-				),
-				TapscriptRoot: tapscriptRoot,
+			if groupReveal != nil {
+				assetProof.GroupKeyReveal = groupReveal
 			}
 		}
 
