@@ -115,6 +115,18 @@ release:
 	$(VERSION_CHECK)
 	./scripts/release.sh build-release "$(VERSION_TAG)" "$(BUILD_SYSTEM)" "$(RELEASE_TAGS)" "$(RELEASE_LDFLAGS)"
 
+release-tag:
+	@$(call print, "Adding release tag.")
+
+	@version_file_path="version.go" && \
+	tag=$$(./scripts/get-git-tag-name.sh $$version_file_path); \
+	exit_status=$$?; \
+	if [ $$exit_status -ne 0 ]; then \
+		echo "Script encountered an error with exit status $$exit_status."; \
+	fi; \
+	echo "Adding git tag: $$tag"; \
+	git tag -s -a "$$tag" -m "Tag generated using command \`make release-tag\`.";
+
 docker-release:
 	@$(call print, "Building release helper docker image.")
 	if [ "$(tag)" = "" ]; then echo "Must specify tag=<commit_or_tag>!"; exit 1; fi
