@@ -264,7 +264,7 @@ func allowCORS(handler http.Handler, origins []string) http.Handler {
 
 		// For a pre-flight request we only need to send the headers
 		// back. No need to call the rest of the chain.
-		if r.Method == "OPTIONS" {
+		if r.Method == http.MethodOptions {
 			return
 		}
 
@@ -688,8 +688,7 @@ func (r *rpcServer) checkBalanceOverflow(ctx context.Context,
 func (r *rpcServer) ListAssets(ctx context.Context,
 	req *taprpc.ListAssetRequest) (*taprpc.ListAssetResponse, error) {
 
-	switch {
-	case req.IncludeSpent && req.IncludeLeased:
+	if req.IncludeSpent && req.IncludeLeased {
 		return nil, fmt.Errorf("cannot specify both include_spent " +
 			"and include_leased")
 	}
@@ -786,7 +785,7 @@ func (r *rpcServer) listBalancesByAsset(ctx context.Context,
 
 		resp.AssetBalances[assetIDStr] = &taprpc.AssetBalance{
 			AssetGenesis: &taprpc.GenesisInfo{
-				Version:      int32(balance.Version),
+				Version:      balance.Version,
 				GenesisPoint: balance.GenesisPoint.String(),
 				AssetType:    taprpc.AssetType(balance.Type),
 				Name:         balance.Tag,
@@ -1147,7 +1146,7 @@ func (r *rpcServer) NewAddr(ctx context.Context,
 		rpcsLog.Debugf("Decoded script key %x (internal %x, tweak %x)",
 			scriptKey.PubKey.SerializeCompressed(),
 			scriptKey.RawKey.PubKey.SerializeCompressed(),
-			scriptKey.Tweak[:])
+			scriptKey.Tweak)
 
 		internalKey, err := UnmarshalKeyDescriptor(req.InternalKey)
 		if err != nil {
@@ -1376,7 +1375,7 @@ func (r *rpcServer) marshalProof(ctx context.Context, p *proof.Proof,
 	}
 	merkleRoot := tapProof.TapscriptRoot(tsHash)
 
-	var exclusionProofs [][]byte
+	exclusionProofs := make([][]byte, 0, len(p.ExclusionProofs))
 	for _, exclusionProof := range p.ExclusionProofs {
 		var exclusionProofBuf bytes.Buffer
 		err = exclusionProof.Encode(&exclusionProofBuf)
@@ -2184,11 +2183,13 @@ func marshalOutboundParcel(
 		internalPubKey := out.Anchor.InternalKey.PubKey
 		internalKeyBytes := internalPubKey.SerializeCompressed()
 		rpcAnchor := &taprpc.TransferOutputAnchor{
-			Outpoint:         out.Anchor.OutPoint.String(),
-			Value:            int64(out.Anchor.Value),
-			InternalKey:      internalKeyBytes,
-			TaprootAssetRoot: out.Anchor.TaprootAssetRoot[:],
-			MerkleRoot:       out.Anchor.MerkleRoot[:],
+			Outpoint:    out.Anchor.OutPoint.String(),
+			Value:       int64(out.Anchor.Value),
+			InternalKey: internalKeyBytes,
+			TaprootAssetRoot: bytes.Clone(
+				out.Anchor.TaprootAssetRoot,
+			),
+			MerkleRoot:       bytes.Clone(out.Anchor.MerkleRoot),
 			TapscriptSibling: out.Anchor.TapscriptSibling,
 			NumPassiveAssets: out.Anchor.NumPassiveAssets,
 		}
@@ -3503,7 +3504,7 @@ func unmarshalLeafKey(key *unirpc.AssetKey) (universe.LeafKey, error) {
 		}
 
 	default:
-		return leafKey, fmt.Errorf("outpoint not set: %v", err)
+		return leafKey, fmt.Errorf("outpoint not set: %w", err)
 	}
 
 	return leafKey, nil

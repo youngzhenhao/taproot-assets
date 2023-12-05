@@ -82,8 +82,8 @@ func (r *RpcUniverseDiff) RootNodes(ctx context.Context,
 	universeRoots, err := r.conn.AssetRoots(
 		ctx, &unirpc.AssetRootRequest{
 			WithAmountsById: q.WithAmountsById,
-			Offset:          int32(q.Offset),
-			Limit:           int32(q.Limit),
+			Offset:          q.Offset,
+			Limit:           q.Limit,
 			Direction:       unirpc.SortDirection(q.SortDirection),
 		},
 	)
@@ -133,8 +133,8 @@ func (r *RpcUniverseDiff) UniverseLeafKeys(ctx context.Context,
 		ctx, &unirpc.AssetLeafKeysRequest{
 			Id:        uniID,
 			Direction: unirpc.SortDirection(q.SortDirection),
-			Offset:    int32(q.Offset),
-			Limit:     int32(q.Limit),
+			Offset:    q.Offset,
+			Limit:     q.Limit,
 		},
 	)
 	if err != nil {
@@ -159,7 +159,7 @@ func (r *RpcUniverseDiff) UniverseLeafKeys(ctx context.Context,
 //
 // TODO(roasbeef): actually add this somewhere else?  * rn kinda
 // asymmetric, as just need this to complete final portion
-// of diff
+// of diff.
 func (r *RpcUniverseDiff) FetchProofLeaf(ctx context.Context,
 	id universe.Identifier,
 	key universe.LeafKey) ([]*universe.Proof, error) {
