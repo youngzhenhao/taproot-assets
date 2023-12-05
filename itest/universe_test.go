@@ -11,6 +11,7 @@ import (
 
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
+	"github.com/btcsuite/btcd/wire"
 	"github.com/lightninglabs/taproot-assets/internal/test"
 
 	tap "github.com/lightninglabs/taproot-assets"
@@ -149,7 +150,7 @@ func testUniverseSync(t *harnessTest) {
 	// query for that asset with the compressed script key.
 	firstAssetID := rpcSimpleAssets[0].AssetGenesis.AssetId
 	firstScriptKey := hex.EncodeToString(rpcSimpleAssets[0].ScriptKey)
-	firstOutpoint, err := tap.UnmarshalOutpoint(
+	firstOutpoint, err := wire.NewOutPointFromString(
 		rpcSimpleAssets[0].ChainAnchor.AnchorOutpoint,
 	)
 	require.NoError(t.t, err)
