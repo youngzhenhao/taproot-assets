@@ -44,7 +44,7 @@ func (l *LndRpcChainBridge) RegisterConfirmationsNtfn(ctx context.Context,
 		opts = append(opts, lndclient.WithIncludeBlock())
 	}
 
-	ctx, cancel := context.WithCancel(ctx) // nolint:govet
+	ctx, cancel := context.WithCancel(ctx) //nolint:govet
 	confChan, errChan, err := l.lnd.ChainNotifier.RegisterConfirmationsNtfn(
 		ctx, txid, pkScript, int32(numConfs), int32(heightHint),
 		opts...,
@@ -131,6 +131,7 @@ func (l *LndRpcChainBridge) GetBlockHeaderSupported(ctx context.Context) bool {
 	getBlockHeaderSupported := getBlockHeaderUnsupported == nil
 
 	l.getBlockHeaderSupported = &getBlockHeaderSupported
+
 	return *l.getBlockHeaderSupported
 }
 
@@ -145,6 +146,7 @@ func (l *LndRpcChainBridge) VerifyBlock(ctx context.Context,
 	// with unset (zero) block heights.
 	if height == 0 {
 		_, err := l.GetBlock(ctx, header.BlockHash())
+
 		return err
 	}
 
@@ -167,10 +169,12 @@ func (l *LndRpcChainBridge) VerifyBlock(ctx context.Context,
 	// supported.
 	if l.GetBlockHeaderSupported(ctx) {
 		_, err = l.GetBlockHeader(ctx, header.BlockHash())
+
 		return err
 	}
 
 	_, err = l.GetBlock(ctx, header.BlockHash())
+
 	return err
 }
 
@@ -190,6 +194,7 @@ func (l *LndRpcChainBridge) PublishTransaction(ctx context.Context,
 	tx *wire.MsgTx) error {
 
 	label := "tapd-asset-minting"
+
 	return l.lnd.WalletKit.PublishTransaction(ctx, tx, label)
 }
 

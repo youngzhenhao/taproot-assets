@@ -179,6 +179,7 @@ func (r *rpcServer) RegisterWithGrpcServer(grpcServer *grpc.Server) error {
 	mintrpc.RegisterMintServer(grpcServer, r)
 	unirpc.RegisterUniverseServer(grpcServer, r)
 	tapdevrpc.RegisterGrpcServer(grpcServer, r)
+
 	return nil
 }
 
@@ -239,6 +240,7 @@ func allowCORS(handler http.Handler, origins []string) http.Handler {
 		// Skip everything if the browser doesn't send the Origin field.
 		if origin == "" {
 			handler.ServeHTTP(w, r)
+
 			return
 		}
 
@@ -278,6 +280,7 @@ func (r *rpcServer) StopDaemon(_ context.Context,
 	_ *taprpc.StopRequest) (*taprpc.StopResponse, error) {
 
 	r.interceptor.RequestShutdown()
+
 	return &taprpc.StopResponse{}, nil
 }
 
@@ -649,6 +652,7 @@ func (r *rpcServer) checkBalanceOverflow(ctx context.Context,
 		// There should only be one balance entry per asset.
 		for _, balanceEntry := range balances {
 			balance = balanceEntry.Balance
+
 			break
 		}
 
@@ -665,6 +669,7 @@ func (r *rpcServer) checkBalanceOverflow(ctx context.Context,
 		// There should only be one balance entry per group.
 		for _, balanceEntry := range balances {
 			balance = balanceEntry.Balance
+
 			break
 		}
 	}
@@ -2222,6 +2227,7 @@ func marshalOutboundParcel(
 	}
 
 	anchorTxHash := parcel.AnchorTx.TxHash()
+
 	return &taprpc.AssetTransfer{
 		TransferTimestamp:  parcel.TransferTime.Unix(),
 		AnchorTxHash:       anchorTxHash[:],
@@ -2409,6 +2415,7 @@ func marshallReceiveAssetEvent(eventInterface fn.Event,
 				TransferType: transferTypeRpc,
 			},
 		}
+
 		return &taprpc.ReceiveAssetEvent{
 			Event: &eventRpc,
 		}, nil
@@ -2426,6 +2433,7 @@ func marshallReceiveAssetEvent(eventInterface fn.Event,
 				Outpoint:  event.OutPoint.String(),
 			},
 		}
+
 		return &taprpc.ReceiveAssetEvent{
 			Event: &eventRpc,
 		}, nil
@@ -2854,6 +2862,7 @@ func (r *rpcServer) FetchAssetMeta(ctx context.Context,
 	}
 
 	metaHash := assetMeta.MetaHash()
+
 	return &taprpc.AssetMeta{
 		Data:     assetMeta.Data,
 		Type:     taprpc.AssetMetaType(assetMeta.Type),

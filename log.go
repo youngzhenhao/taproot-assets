@@ -41,6 +41,7 @@ var (
 			subsystem: subsystem,
 		}
 		tapPkgLoggers = append(tapPkgLoggers, l)
+
 		return l
 	}
 
