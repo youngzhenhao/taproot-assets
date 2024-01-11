@@ -426,7 +426,7 @@ func (w *Witness) Decode(r io.Reader) error {
 }
 
 // DeepEqual returns true if this witness is equal with the given witness.
-func (w *Witness) DeepEqual(o *Witness) bool {
+func (w *Witness) DeepEqual(assetVersion Version, o *Witness) bool {
 	if w == nil || o == nil {
 		return w == o
 	}
@@ -435,11 +435,17 @@ func (w *Witness) DeepEqual(o *Witness) bool {
 		return false
 	}
 
-	if !reflect.DeepEqual(w.TxWitness, o.TxWitness) {
+	if !w.SplitCommitment.DeepEqual(o.SplitCommitment) {
 		return false
 	}
 
-	return w.SplitCommitment.DeepEqual(o.SplitCommitment)
+	// If we're encoding a segwit witness, we don't include the witness
+	// field, so we can't compare it.
+	if assetVersion == V1 {
+		return true
+	}
+
+	return reflect.DeepEqual(w.TxWitness, o.TxWitness)
 }
 
 // ScriptVersion denotes the asset script versioning scheme.
@@ -1263,7 +1269,8 @@ func (a *Asset) DeepEqual(o *Asset) bool {
 	}
 
 	for i := range a.PrevWitnesses {
-		if !a.PrevWitnesses[i].DeepEqual(&o.PrevWitnesses[i]) {
+		oPrevWitness := &o.PrevWitnesses[i]
+		if !a.PrevWitnesses[i].DeepEqual(a.Version, oPrevWitness) {
 			return false
 		}
 	}
