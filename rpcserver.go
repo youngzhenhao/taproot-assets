@@ -21,6 +21,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	proxy "github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"github.com/lightninglabs/neutrino/cache/lru"
 	"github.com/lightninglabs/taproot-assets/address"
@@ -1838,6 +1839,147 @@ func (r *rpcServer) NextScriptKey(ctx context.Context,
 
 	return &wrpc.NextScriptKeyResponse{
 		ScriptKey: marshalScriptKey(scriptKey),
+	}, nil
+}
+
+// QueryInternalKey returns the key descriptor for the given internal key.
+func (r *rpcServer) QueryInternalKey(ctx context.Context,
+	req *wrpc.QueryInternalKeyRequest) (*wrpc.QueryInternalKeyResponse,
+	error) {
+
+	var (
+		internalKey *btcec.PublicKey
+		keyLocator  keychain.KeyLocator
+		err         error
+	)
+
+	// We allow the user to specify the key either in the 33-byte compressed
+	// format or the 32-byte x-only format.
+	switch {
+	case len(req.InternalKey) == 33:
+		internalKey, err = btcec.ParsePubKey(req.InternalKey)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing internal key: %w",
+				err)
+		}
+
+		// If the full 33-byte key was specified, we expect the user to
+		// already know the parity byte, so we only try once.
+		keyLocator, err = r.cfg.AssetWallet.FetchInternalKey(
+			ctx, internalKey,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("error fetching internal key: "+
+				"%w", err)
+		}
+
+	case len(req.InternalKey) == 32:
+		internalKey, err = schnorr.ParsePubKey(req.InternalKey)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing internal key: %w",
+				err)
+		}
+
+		keyLocator, err = r.cfg.AssetWallet.FetchInternalKey(
+			ctx, internalKey,
+		)
+
+		// If the key can't be found with the even parity, we'll try
+		// the odd parity.
+		if errors.Is(err, address.ErrInternalKeyNotFound) {
+			internalKey = oddParity(internalKey)
+
+			keyLocator, err = r.cfg.AssetWallet.FetchInternalKey(
+				ctx, internalKey,
+			)
+			if err != nil {
+				return nil, fmt.Errorf("error fetching "+
+					"internal key: %w", err)
+			}
+		} else if err != nil {
+			return nil, fmt.Errorf("error fetching internal key: "+
+				"%w", err)
+		}
+
+	default:
+		return nil, fmt.Errorf("invalid internal key length")
+	}
+
+	return &wrpc.QueryInternalKeyResponse{
+		InternalKey: marshalKeyDescriptor(keychain.KeyDescriptor{
+			PubKey:     internalKey,
+			KeyLocator: keyLocator,
+		}),
+	}, nil
+
+}
+
+// QueryScriptKey returns the full script key descriptor for the given tweaked
+// script key.
+func (r *rpcServer) QueryScriptKey(ctx context.Context,
+	req *wrpc.QueryScriptKeyRequest) (*wrpc.QueryScriptKeyResponse, error) {
+
+	var (
+		scriptKey  *btcec.PublicKey
+		tweakedKey *asset.TweakedScriptKey
+		err        error
+	)
+
+	// We allow the user to specify the key either in the 33-byte compressed
+	// format or the 32-byte x-only format.
+	switch {
+	case len(req.TweakedScriptKey) == 33:
+		scriptKey, err = btcec.ParsePubKey(req.TweakedScriptKey)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing script key: %w",
+				err)
+		}
+
+		tweakedKey, err = r.cfg.AssetWallet.FetchScriptKey(
+			ctx, scriptKey,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("error fetching script key: %w",
+				err)
+		}
+
+	case len(req.TweakedScriptKey) == 32:
+		scriptKey, err = schnorr.ParsePubKey(req.TweakedScriptKey)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing script key: %w",
+				err)
+		}
+
+		tweakedKey, err = r.cfg.AssetWallet.FetchScriptKey(
+			ctx, scriptKey,
+		)
+
+		// If the key can't be found with the even parity, we'll try
+		// the odd parity.
+		if errors.Is(err, address.ErrScriptKeyNotFound) {
+			scriptKey = oddParity(scriptKey)
+
+			tweakedKey, err = r.cfg.AssetWallet.FetchScriptKey(
+				ctx, scriptKey,
+			)
+		}
+
+		// Return either the original error or the error from the re-try
+		// with odd parity.
+		if err != nil {
+			return nil, fmt.Errorf("error fetching script key: %w",
+				err)
+		}
+
+	default:
+		return nil, fmt.Errorf("invalid script key length")
+	}
+
+	return &wrpc.QueryScriptKeyResponse{
+		ScriptKey: marshalScriptKey(asset.ScriptKey{
+			PubKey:           scriptKey,
+			TweakedScriptKey: tweakedKey,
+		}),
 	}, nil
 }
 
@@ -4524,4 +4666,17 @@ func MarshalAssetFedSyncCfg(
 		AllowSyncInsert: config.AllowSyncInsert,
 		AllowSyncExport: config.AllowSyncExport,
 	}, nil
+}
+
+// oddParity turns the given public key parsed as a Schnorr x-only public key
+// from the even parity into its odd parity counterpart.
+func oddParity(evenParityKey *btcec.PublicKey) *btcec.PublicKey {
+	var keyCompressed [btcec.PubKeyBytesLenCompressed]byte
+	keyCompressed[0] = secp256k1.PubKeyFormatCompressedOdd
+	copy(keyCompressed[1:], schnorr.SerializePubKey(evenParityKey))
+
+	// We already know the even key is a valid point on the curve, so we
+	// don't need to check the error here as the odd key will also be valid.
+	oddKey, _ := btcec.ParsePubKey(keyCompressed[:])
+	return oddKey
 }
