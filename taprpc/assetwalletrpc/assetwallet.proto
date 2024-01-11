@@ -32,6 +32,14 @@ service AssetWallet {
         returns (taprpc.SendAssetResponse);
 
     /*
+    MapVirtualPsbts maps the given virtual PSBTs to the given BTC level anchor
+    transaction. This is useful if the anchor transaction was created outside
+    of the wallet.
+    */
+    rpc MapVirtualPsbts (MapVirtualPsbtsRequest)
+        returns (MapVirtualPsbtsResponse);
+
+    /*
     NextInternalKey derives the next internal key for the given key family and
     stores it as an internal key in the database to make sure it is identified
     as a local key later on when importing proofs. While an internal key can
@@ -190,6 +198,24 @@ message AnchorVirtualPsbtsRequest {
     the BTC level anchor transaction.
     */
     repeated bytes virtual_psbts = 1;
+}
+
+message MapVirtualPsbtsRequest {
+    /*
+    The list of virtual transactions that should be mapped to the given BTC
+    level anchor transaction.
+    */
+    repeated bytes virtual_psbts = 1;
+
+    /*
+    The BTC level anchor transaction that the virtual transactions should be
+    mapped to.
+    */
+    bytes anchor_psbt = 2;
+}
+
+message MapVirtualPsbtsResponse {
+    bytes anchor_psbt = 1;
 }
 
 message NextInternalKeyRequest {

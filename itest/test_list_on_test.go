@@ -211,6 +211,10 @@ var testCases = []*testCase{
 		name: "mint proof repeat fed sync attempt",
 		test: testMintProofRepeatFedSyncAttempt,
 	},
+	{
+		name: "simulate taproot assets channel flow",
+		test: testSimulateTaprootAssetsChannelFlow,
+	},
 }
 
 var optionalTestCases = []*testCase{

@@ -513,6 +513,13 @@ func shutdownAndAssert(t *harnessTest, node *node.HarnessNode,
 	t.lndHarness.Shutdown(node)
 }
 
+func toJSON(t *testing.T, resp proto.Message) string {
+	jsonStr, err := formatProtoJSON(resp)
+	require.NoError(t, err)
+
+	return jsonStr
+}
+
 func formatProtoJSON(resp proto.Message) (string, error) {
 	jsonBytes, err := taprpc.ProtoJSONMarshalOpts.Marshal(resp)
 	if err != nil {

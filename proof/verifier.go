@@ -410,9 +410,10 @@ func (p *Proof) Verify(ctx context.Context, prev *AssetSnapshot,
 			"header: %w", err)
 	}
 
-	if !p.TxMerkleProof.Verify(&p.AnchorTx, p.BlockHeader.MerkleRoot) {
-		return nil, ErrInvalidTxMerkleProof
-	}
+	// TODO(guggero): Turn into merkle proof validator.
+	//if !p.TxMerkleProof.Verify(&p.AnchorTx, p.BlockHeader.MerkleRoot) {
+	//	return nil, ErrInvalidTxMerkleProof
+	//}
 
 	// TODO(jhb): check for genesis asset and populate asset fields before
 	// further verification

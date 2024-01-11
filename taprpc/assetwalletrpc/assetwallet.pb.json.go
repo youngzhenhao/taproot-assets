@@ -96,6 +96,31 @@ func RegisterAssetWalletJSONCallbacks(registry map[string]func(ctx context.Conte
 		callback(string(respBytes), nil)
 	}
 
+	registry["assetwalletrpc.AssetWallet.MapVirtualPsbts"] = func(ctx context.Context,
+		conn *grpc.ClientConn, reqJSON string, callback func(string, error)) {
+
+		req := &MapVirtualPsbtsRequest{}
+		err := marshaler.Unmarshal([]byte(reqJSON), req)
+		if err != nil {
+			callback("", err)
+			return
+		}
+
+		client := NewAssetWalletClient(conn)
+		resp, err := client.MapVirtualPsbts(ctx, req)
+		if err != nil {
+			callback("", err)
+			return
+		}
+
+		respBytes, err := marshaler.Marshal(resp)
+		if err != nil {
+			callback("", err)
+			return
+		}
+		callback(string(respBytes), nil)
+	}
+
 	registry["assetwalletrpc.AssetWallet.NextInternalKey"] = func(ctx context.Context,
 		conn *grpc.ClientConn, reqJSON string, callback func(string, error)) {
 

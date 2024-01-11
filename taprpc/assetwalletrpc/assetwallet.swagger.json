@@ -391,6 +391,15 @@
         }
       }
     },
+    "assetwalletrpcMapVirtualPsbtsResponse": {
+      "type": "object",
+      "properties": {
+        "anchor_psbt": {
+          "type": "string",
+          "format": "byte"
+        }
+      }
+    },
     "assetwalletrpcNextInternalKeyRequest": {
       "type": "object",
       "properties": {

@@ -31,6 +31,10 @@ type AssetWalletClient interface {
 	// TODO(guggero): Actually implement accepting and merging multiple
 	// transactions.
 	AnchorVirtualPsbts(ctx context.Context, in *AnchorVirtualPsbtsRequest, opts ...grpc.CallOption) (*taprpc.SendAssetResponse, error)
+	// MapVirtualPsbts maps the given virtual PSBTs to the given BTC level anchor
+	// transaction. This is useful if the anchor transaction was created outside
+	// of the wallet.
+	MapVirtualPsbts(ctx context.Context, in *MapVirtualPsbtsRequest, opts ...grpc.CallOption) (*MapVirtualPsbtsResponse, error)
 	// NextInternalKey derives the next internal key for the given key family and
 	// stores it as an internal key in the database to make sure it is identified
 	// as a local key later on when importing proofs. While an internal key can
@@ -91,6 +95,15 @@ func (c *assetWalletClient) SignVirtualPsbt(ctx context.Context, in *SignVirtual
 func (c *assetWalletClient) AnchorVirtualPsbts(ctx context.Context, in *AnchorVirtualPsbtsRequest, opts ...grpc.CallOption) (*taprpc.SendAssetResponse, error) {
 	out := new(taprpc.SendAssetResponse)
 	err := c.cc.Invoke(ctx, "/assetwalletrpc.AssetWallet/AnchorVirtualPsbts", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *assetWalletClient) MapVirtualPsbts(ctx context.Context, in *MapVirtualPsbtsRequest, opts ...grpc.CallOption) (*MapVirtualPsbtsResponse, error) {
+	out := new(MapVirtualPsbtsResponse)
+	err := c.cc.Invoke(ctx, "/assetwalletrpc.AssetWallet/MapVirtualPsbts", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -176,6 +189,10 @@ type AssetWalletServer interface {
 	// TODO(guggero): Actually implement accepting and merging multiple
 	// transactions.
 	AnchorVirtualPsbts(context.Context, *AnchorVirtualPsbtsRequest) (*taprpc.SendAssetResponse, error)
+	// MapVirtualPsbts maps the given virtual PSBTs to the given BTC level anchor
+	// transaction. This is useful if the anchor transaction was created outside
+	// of the wallet.
+	MapVirtualPsbts(context.Context, *MapVirtualPsbtsRequest) (*MapVirtualPsbtsResponse, error)
 	// NextInternalKey derives the next internal key for the given key family and
 	// stores it as an internal key in the database to make sure it is identified
 	// as a local key later on when importing proofs. While an internal key can
@@ -220,6 +237,9 @@ func (UnimplementedAssetWalletServer) SignVirtualPsbt(context.Context, *SignVirt
 }
 func (UnimplementedAssetWalletServer) AnchorVirtualPsbts(context.Context, *AnchorVirtualPsbtsRequest) (*taprpc.SendAssetResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AnchorVirtualPsbts not implemented")
+}
+func (UnimplementedAssetWalletServer) MapVirtualPsbts(context.Context, *MapVirtualPsbtsRequest) (*MapVirtualPsbtsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method MapVirtualPsbts not implemented")
 }
 func (UnimplementedAssetWalletServer) NextInternalKey(context.Context, *NextInternalKeyRequest) (*NextInternalKeyResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method NextInternalKey not implemented")
@@ -305,6 +325,24 @@ func _AssetWallet_AnchorVirtualPsbts_Handler(srv interface{}, ctx context.Contex
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AssetWalletServer).AnchorVirtualPsbts(ctx, req.(*AnchorVirtualPsbtsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AssetWallet_MapVirtualPsbts_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MapVirtualPsbtsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AssetWalletServer).MapVirtualPsbts(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/assetwalletrpc.AssetWallet/MapVirtualPsbts",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AssetWalletServer).MapVirtualPsbts(ctx, req.(*MapVirtualPsbtsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -453,6 +491,10 @@ var AssetWallet_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AnchorVirtualPsbts",
 			Handler:    _AssetWallet_AnchorVirtualPsbts_Handler,
+		},
+		{
+			MethodName: "MapVirtualPsbts",
+			Handler:    _AssetWallet_MapVirtualPsbts_Handler,
 		},
 		{
 			MethodName: "NextInternalKey",

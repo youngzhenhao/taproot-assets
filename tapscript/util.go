@@ -9,6 +9,7 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcwallet/wallet/txsizes"
 	"github.com/lightninglabs/taproot-assets/commitment"
+	"github.com/lightninglabs/taproot-assets/fn"
 	"github.com/lightningnetwork/lnd/lnwallet/chainfee"
 )
 
@@ -24,6 +25,11 @@ func PayToAddrScript(internalKey btcec.PublicKey, sibling *chainhash.Hash,
 	outputKey := txscript.ComputeTaprootOutputKey(
 		&internalKey, tapscriptRoot[:],
 	)
+
+	log.Tracef("Generated commitment output key %x from internal key %x "+
+		"and tapscript root %x (asset root %x)", outputKey.SerializeCompressed(),
+		internalKey.SerializeCompressed(), tapscriptRoot[:],
+		fn.ByteSlice(commitment.TapscriptRoot(nil)))
 
 	return PayToTaprootScript(outputKey)
 }

@@ -26,11 +26,15 @@ import (
 	"github.com/lightninglabs/taproot-assets/fn"
 	"github.com/lightninglabs/taproot-assets/mssmt"
 	"github.com/lightninglabs/taproot-assets/proof"
+	"github.com/lightninglabs/taproot-assets/tapchannel"
 	"github.com/lightninglabs/taproot-assets/tapgarden"
 	"github.com/lightninglabs/taproot-assets/tappsbt"
 	"github.com/lightninglabs/taproot-assets/tapscript"
+	"github.com/lightningnetwork/lnd/input"
 	"github.com/lightningnetwork/lnd/keychain"
+	"github.com/lightningnetwork/lnd/lnwallet"
 	"github.com/lightningnetwork/lnd/lnwallet/chainfee"
+	"github.com/lightningnetwork/lnd/lnwallet/chanfunding"
 )
 
 const (
@@ -1770,4 +1774,265 @@ func copyPsbt(packet *psbt.Packet) (*psbt.Packet, error) {
 	}
 
 	return psbt.NewFromRawBytes(&buf, false)
+}
+
+func CreateFundedAnchorTX(allocations []tapchannel.Allocation,
+	vPackets []*tappsbt.VPacket, extraInputs []*chanfunding.Coin,
+	feeRate chainfee.SatPerKWeight) (*AnchorTransaction, error) {
+
+	// Create output skeleton from the allocations.
+	var maxOutputIndex uint32
+	for _, a := range allocations {
+		if a.OutputIndex > maxOutputIndex {
+			maxOutputIndex = a.OutputIndex
+		}
+	}
+
+	txTemplate := wire.NewMsgTx(2)
+	for i := uint32(0); i <= maxOutputIndex; i++ {
+		txTemplate.AddTxOut(createDummyOutput())
+	}
+
+	btcPacket, err := psbt.NewFromUnsignedTx(txTemplate)
+	if err != nil {
+		return nil, fmt.Errorf("unable to make psbt packet: %w", err)
+	}
+
+	// Populate output keys and values.
+	var (
+		btcAmountNeeded btcutil.Amount
+		estimator       input.TxWeightEstimator
+	)
+	for _, a := range allocations {
+		out := &btcPacket.Outputs[a.OutputIndex]
+		out.TaprootInternalKey = schnorr.SerializePubKey(a.InternalKey)
+
+		// TODO: Using the TaprootTapTree for storing the encoded
+		// sibling preimage is wrong! We should require the full
+		// Tapscript tree to be provided and encode it in the BIP-0174
+		// manner.
+		siblingBytes, _, err := commitment.MaybeEncodeTapscriptPreimage(
+			a.TapscriptSibling,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("unable to encode sibling "+
+				"preimage: %w", err)
+		}
+		out.TaprootTapTree = siblingBytes
+
+		txOut := btcPacket.UnsignedTx.TxOut[a.OutputIndex]
+		txOut.Value = int64(a.BtcAmount)
+
+		btcAmountNeeded += btcutil.Amount(txOut.Value)
+
+		estimator.AddTaprootKeySpendInput(txscript.SigHashDefault)
+	}
+
+	// Populate inputs.
+	for pIdx := range vPackets {
+		for iIdx := range vPackets[pIdx].Inputs {
+			vIn := vPackets[pIdx].Inputs[iIdx]
+			anchor := vIn.Anchor
+
+			if HasInput(btcPacket.UnsignedTx, vIn.PrevID.OutPoint) {
+				continue
+			}
+
+			btcPacket.Inputs = append(btcPacket.Inputs, psbt.PInput{
+				WitnessUtxo: &wire.TxOut{
+					Value:    int64(anchor.Value),
+					PkScript: anchor.PkScript,
+				},
+				SighashType:            anchor.SigHashType,
+				Bip32Derivation:        anchor.Bip32Derivation,
+				TaprootBip32Derivation: anchor.TrBip32Derivation,
+				TaprootInternalKey: schnorr.SerializePubKey(
+					anchor.InternalKey,
+				),
+				TaprootMerkleRoot: anchor.MerkleRoot,
+			})
+			btcPacket.UnsignedTx.TxIn = append(
+				btcPacket.UnsignedTx.TxIn, &wire.TxIn{
+					PreviousOutPoint: vIn.PrevID.OutPoint,
+				},
+			)
+
+			estimator.AddTaprootKeySpendInput(anchor.SigHashType)
+		}
+	}
+
+	// Now we add all BTC-only inputs to the packet.
+	for _, extraInput := range extraInputs {
+		sigHashType := txscript.SigHashAll
+		switch {
+		case txscript.IsPayToWitnessPubKeyHash(extraInput.PkScript):
+			estimator.AddP2WKHInput()
+
+		case txscript.IsPayToScriptHash(extraInput.PkScript):
+			estimator.AddNestedP2WKHInput()
+
+		case txscript.IsPayToTaproot(extraInput.PkScript):
+			sigHashType = txscript.SigHashDefault
+			estimator.AddTaprootKeySpendInput(sigHashType)
+
+		default:
+			return nil, fmt.Errorf("unsupported extra input with "+
+				"pkscript %x", extraInput.PkScript)
+		}
+
+		btcPacket.Inputs = append(btcPacket.Inputs, psbt.PInput{
+			WitnessUtxo: &wire.TxOut{
+				Value:    extraInput.Value,
+				PkScript: extraInput.PkScript,
+			},
+			SighashType: sigHashType,
+		})
+		btcPacket.UnsignedTx.TxIn = append(
+			btcPacket.UnsignedTx.TxIn, &wire.TxIn{
+				PreviousOutPoint: extraInput.OutPoint,
+			},
+		)
+	}
+
+	totalWeight := int64(estimator.Weight())
+	requiredFee := int64(feeRate.FeeForWeight(totalWeight))
+
+	// Now we need to deduct the fees from the output that is marked as
+	// such.
+	changeOutputIndex := int32(-1)
+	for _, a := range allocations {
+		if a.BtcSubtractFees {
+			changeOutputIndex = int32(a.OutputIndex)
+			out := btcPacket.UnsignedTx.TxOut[a.OutputIndex]
+			out.Value -= requiredFee
+
+			dustLimit := lnwallet.DustLimitForSize(
+				len(out.PkScript),
+			)
+			if out.Value < int64(dustLimit) {
+				return nil, fmt.Errorf("cannot subtract fees "+
+					"from output %d, not enough coins "+
+					"selected to pay fee of %d sats",
+					a.OutputIndex, requiredFee)
+			}
+		}
+	}
+
+	if changeOutputIndex == -1 {
+		return nil, fmt.Errorf("no output marked as change output")
+	}
+
+	// We can now update the anchor outputs as we have the final
+	// commitments.
+	anchorCommitments := make(map[uint32]*commitment.TapCommitment)
+	for pIdx := range vPackets {
+		vPacket := vPackets[pIdx]
+
+		inputAssets := fn.Map(
+			vPacket.Inputs, func(vIn *tappsbt.VInput) *asset.Asset {
+				return vIn.Asset()
+			},
+		)
+		inputCommitment, err := commitment.FromAssets(inputAssets...)
+		if err != nil {
+			return nil, fmt.Errorf("unable to create input "+
+				"commitment: %w", err)
+		}
+
+		outputCommitments, err := tapscript.CreateOutputCommitments(
+			tappsbt.InputCommitments{
+				0: inputCommitment,
+			}, vPacket, nil,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("unable to create new "+
+				"output commitments: %w", err)
+		}
+
+		for oIdx := range outputCommitments {
+			outputCommitment := outputCommitments[oIdx]
+			anchorIndex := vPacket.Outputs[oIdx].AnchorOutputIndex
+
+			anchorCommitment, ok := anchorCommitments[anchorIndex]
+			if ok {
+				err := anchorCommitment.Merge(outputCommitment)
+				if err != nil {
+					return nil, fmt.Errorf("cannot merge "+
+						"output commitments: %w", err)
+				}
+			} else {
+				anchorCommitment = outputCommitment
+			}
+			anchorCommitments[anchorIndex] = anchorCommitment
+		}
+	}
+
+	// Update the anchor outputs with the merged commitments.
+	for anchorIndex := range anchorCommitments {
+		// The external output index cannot be out of bounds of the
+		// actual TX outputs. This should be checked earlier and is just
+		// a final safeguard here.
+		if anchorIndex >= uint32(len(btcPacket.Outputs)) {
+			return nil, tapscript.ErrInvalidOutputIndexes
+		}
+
+		btcOut := btcPacket.Outputs[anchorIndex]
+		internalKey, err := schnorr.ParsePubKey(
+			btcOut.TaprootInternalKey,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		// Prepare the anchor output's tapscript sibling, if there is
+		// one.
+		_, siblingHash, err := commitment.MaybeDecodeTapscriptPreimage(
+			btcOut.TaprootTapTree,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		// Create the scripts corresponding to the receiver's
+		// TapCommitment.
+		anchorCommitment := anchorCommitments[anchorIndex]
+
+		tapscript.LogCommitment(
+			"Output", int(anchorIndex), anchorCommitment,
+			internalKey, nil, nil,
+		)
+
+		script, err := tapscript.PayToAddrScript(
+			*internalKey, siblingHash, *anchorCommitment,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		btcTxOut := btcPacket.UnsignedTx.TxOut[anchorIndex]
+		btcTxOut.PkScript = script
+	}
+
+	// TODO: Lock additional inputs.
+	return &AnchorTransaction{
+		FundedPsbt: &tapgarden.FundedPsbt{
+			Pkt:               btcPacket,
+			ChangeOutputIndex: changeOutputIndex,
+			ChainFees:         requiredFee,
+		},
+		FinalTx:           btcPacket.UnsignedTx,
+		TargetFeeRate:     feeRate,
+		ChainFees:         requiredFee,
+		OutputCommitments: anchorCommitments,
+	}, nil
+}
+
+func HasInput(tx *wire.MsgTx, outpoint wire.OutPoint) bool {
+	for _, in := range tx.TxIn {
+		if in.PreviousOutPoint == outpoint {
+			return true
+		}
+	}
+
+	return false
 }

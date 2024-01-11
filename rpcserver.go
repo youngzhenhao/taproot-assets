@@ -1824,6 +1824,13 @@ func (r *rpcServer) AnchorVirtualPsbts(ctx context.Context,
 	}, nil
 }
 
+func (r *rpcServer) MapVirtualPsbts(ctx context.Context,
+	req *wrpc.MapVirtualPsbtsRequest) (*wrpc.MapVirtualPsbtsResponse,
+	error) {
+
+	return nil, nil
+}
+
 // NextInternalKey derives the next internal key for the given key family and
 // stores it as an internal key in the database to make sure it is identified
 // as a local key later on when importing proofs. While an internal key can
