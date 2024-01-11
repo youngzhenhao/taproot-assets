@@ -30,6 +30,27 @@ func Map[I, O any, S []I](s S, f func(I) O) []O {
 	return output
 }
 
+// Keys returns a slice containing all the keys of the given map.
+func Keys[T any, K comparable](s map[K]T) []K {
+	output := make([]K, 0, len(s))
+	for key := range s {
+		key := key
+		output = append(output, key)
+	}
+
+	return output
+}
+
+// Values returns a slice containing all the values of the given map.
+func Values[T any, K comparable](s map[K]T) []T {
+	output := make([]T, 0, len(s))
+	for key := range s {
+		output = append(output, s[key])
+	}
+
+	return output
+}
+
 // Filter applies the given predicate function to each element of the given
 // slice and generates a new slice containing only the elements for which the
 // predicate returned true.
