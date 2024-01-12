@@ -665,10 +665,30 @@ func (b *BatchCaretaker) stateStep(currentState BatchState) (BatchState, error) 
 
 		b.cfg.Batch.RootAssetCommitment = tapCommitment
 
+		// Fetch the optional Tapscript tree for this batch, and convert
+		// it to a TapHash.
+		batchKey := asset.ToSerialized(b.cfg.Batch.BatchKey.PubKey)
+		batchTapscriptTree, err := b.cfg.TreeStore.LoadTapscriptTree(
+			ctx, batchKey,
+		)
+		if err != asset.TreeNotFound {
+			return 0, err
+		}
+
+		var tapSibling *chainhash.Hash
+		if batchTapscriptTree != nil {
+			tapSibling, err = tapscript.TapTreeToSibling(
+				*batchTapscriptTree,
+			)
+			if err != nil {
+				return 0, err
+			}
+		}
+
 		// With the commitment Taproot Asset root SMT constructed, we'll
 		// map that into the tapscript root we'll insert into the
 		// genesis transaction.
-		genesisScript, err := b.cfg.Batch.genesisScript()
+		genesisScript, err := b.cfg.Batch.genesisScript(tapSibling)
 		if err != nil {
 			return 0, fmt.Errorf("unable to create genesis "+
 				"script: %v", err)
@@ -766,7 +786,9 @@ func (b *BatchCaretaker) stateStep(currentState BatchState) (BatchState, error) 
 		//
 		// TODO(roasbeef): re-run during the broadcast phase to ensure
 		// it's fully imported?
-		mintingOutputKey, tapRoot, err := b.cfg.Batch.MintingOutputKey()
+		mintingOutputKey, tapRoot, err := b.cfg.Batch.MintingOutputKey(
+			nil,
+		)
 		if err != nil {
 			return 0, err
 		}

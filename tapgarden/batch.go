@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/lightninglabs/taproot-assets/asset"
 	"github.com/lightninglabs/taproot-assets/commitment"
@@ -104,7 +105,9 @@ func (m *MintingBatch) validateGroupAnchor(s *Seedling) error {
 
 // MintingOutputKey derives the output key that once mined, will commit to the
 // Taproot asset root, thereby creating the set of included assets.
-func (m *MintingBatch) MintingOutputKey() (*btcec.PublicKey, []byte, error) {
+func (m *MintingBatch) MintingOutputKey(
+	sibling *chainhash.Hash) (*btcec.PublicKey, []byte, error) {
+
 	if m.mintingPubKey != nil {
 		return m.mintingPubKey, m.taprootAssetScriptRoot, nil
 	}
@@ -113,7 +116,7 @@ func (m *MintingBatch) MintingOutputKey() (*btcec.PublicKey, []byte, error) {
 		return nil, nil, fmt.Errorf("no asset commitment present")
 	}
 
-	taprootAssetScriptRoot := m.RootAssetCommitment.TapscriptRoot(nil)
+	taprootAssetScriptRoot := m.RootAssetCommitment.TapscriptRoot(sibling)
 
 	m.taprootAssetScriptRoot = taprootAssetScriptRoot[:]
 	m.mintingPubKey = txscript.ComputeTaprootOutputKey(
@@ -125,8 +128,8 @@ func (m *MintingBatch) MintingOutputKey() (*btcec.PublicKey, []byte, error) {
 
 // genesisScript returns the script that should be placed in the minting output
 // within the genesis transaction.
-func (m *MintingBatch) genesisScript() ([]byte, error) {
-	mintingOutputKey, _, err := m.MintingOutputKey()
+func (m *MintingBatch) genesisScript(sibling *chainhash.Hash) ([]byte, error) {
+	mintingOutputKey, _, err := m.MintingOutputKey(sibling)
 	if err != nil {
 		return nil, err
 	}
